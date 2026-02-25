@@ -48,20 +48,35 @@ namespace
 		return FString::Printf(TEXT("-crf %d"), InCRF);
 	}
 
-	FString GetFramePackingArgs(EFFmpegVideoCodec InCodec, EAsymmetricStereoLayout InLayout)
+	FString GetStereoMetadataArgs(EFFmpegVideoCodec InCodec, EAsymmetricStereoLayout InLayout)
 	{
-		// H.264/H.265 Frame Packing Arrangement SEI: 3=side-by-side, 4=top-bottom
-		const int32 FramePackingType = (InLayout == EAsymmetricStereoLayout::SideBySide) ? 3 : 4;
-
 		switch (InCodec)
 		{
 		case EFFmpegVideoCodec::H264:
-			return FString::Printf(TEXT("-x264-params frame-packing=%d"), FramePackingType);
+			{
+				// H.264 Frame Packing Arrangement SEI: 3=side-by-side, 4=top-bottom
+				const int32 FramePackingType = (InLayout == EAsymmetricStereoLayout::SideBySide) ? 3 : 4;
+				return FString::Printf(TEXT("-x264-params frame-packing=%d"), FramePackingType);
+			}
 		case EFFmpegVideoCodec::H265:
-			return FString::Printf(TEXT("-x265-params frame-packing=%d"), FramePackingType);
+			{
+				// x265 has no frame-packing CLI param; use MKV container stereo_mode metadata
+				const TCHAR* StereoMode = (InLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("side_by_side_left") : TEXT("top_bottom_left");
+				return FString::Printf(TEXT("-metadata:s:v stereo_mode=%s"), StereoMode);
+			}
 		default:
 			return FString();
 		}
+	}
+
+	FString GetOutputFormat(EFFmpegVideoCodec InCodec, EFFmpegOutputFormat InFormat)
+	{
+		// H.265 forces MKV container for stereo_mode metadata support
+		if (InCodec == EFFmpegVideoCodec::H265)
+		{
+			return TEXT("mkv");
+		}
+		return GetFFmpegFormatString(InFormat);
 	}
 }
 
@@ -412,10 +427,10 @@ void UMoviePipelineAsymmetricStereoPass::RunFFmpegComposite()
 	{
 		// Output video file
 		const FString Codec = GetFFmpegCodecString(VideoCodec);
-		const FString Fmt = GetFFmpegFormatString(OutputFormat);
+		const FString Fmt = GetOutputFormat(VideoCodec, OutputFormat);
 		const FString PixFmt = GetFFmpegPixFmtForCodec(VideoCodec);
 		const FString QualityArgs = GetFFmpegQualityArgs(VideoCodec, CompositeQuality);
-		const FString FramePackingArgs = GetFramePackingArgs(VideoCodec, StereoLayout);
+		const FString StereoArgs = GetStereoMetadataArgs(VideoCodec, StereoLayout);
 		OutputPath = FPaths::Combine(OutputDir, FString::Printf(TEXT("stereo_%s.%s"), *LayoutName, *Fmt));
 
 		Args = FString::Printf(
@@ -426,7 +441,7 @@ void UMoviePipelineAsymmetricStereoPass::RunFFmpegComposite()
 			*Codec,
 			*QualityArgs,
 			*PixFmt,
-			*FramePackingArgs,
+			*StereoArgs,
 			*OutputPath
 		);
 	}
