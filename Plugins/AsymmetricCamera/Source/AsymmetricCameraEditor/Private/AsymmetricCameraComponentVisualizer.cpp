@@ -181,7 +181,7 @@ void FAsymmetricCameraComponentVisualizer::DrawStereoFrustums(
 	const FVector LeftEye  = BaseEye + VR * (-HalfSep);
 	const FVector RightEye = BaseEye + VR * ( HalfSep);
 
-	const FLinearColor LeftColor  = FLinearColor::Cyan;
+	const FLinearColor LeftColor  = FLinearColor(0.0f, 1.0f, 1.0f);
 	const FLinearColor RightColor = FLinearColor(1.0f, 0.0f, 1.0f);
 	const float Thickness = 1.0f;
 	const uint8 DepthPriority = SDPG_World;
@@ -348,7 +348,7 @@ void FAsymmetricCameraComponentVisualizer::DrawVisualizationHUD(
 				if (WorldToCanvas(LeftEye, LeftPos))
 				{
 					FCanvasTextItem LItem(FVector2D(LeftPos.X + 8.0f, LeftPos.Y - 12.0f),
-						FText::FromString(TEXT("L")), Font, FLinearColor::Cyan);
+						FText::FromString(TEXT("L")), Font, FLinearColor(0.0f, 1.0f, 1.0f));
 					LItem.EnableShadow(FLinearColor::Black);
 					Canvas->DrawItem(LItem);
 				}
