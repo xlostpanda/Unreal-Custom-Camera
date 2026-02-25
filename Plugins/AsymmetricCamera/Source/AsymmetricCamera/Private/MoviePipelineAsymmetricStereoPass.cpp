@@ -72,11 +72,11 @@ UMoviePipelineAsymmetricStereoPass::UMoviePipelineAsymmetricStereoPass()
 	StereoLayout = EAsymmetricStereoLayout::SideBySide;
 	EyeSeparation = 6.4f;
 	bSwapEyes = false;
-	bAutoComposite = true;
+	CompositeMode = EAsymmetricCompositeMode::ImageSequence;
 	VideoCodec = EFFmpegVideoCodec::H264;
 	CompositeQuality = 18;
 	OutputFormat = EFFmpegOutputFormat::MP4;
-	bDeleteSourceAfterComposite = false;
+	bDeleteSourceAfterComposite = true;
 
 	// Set default FFmpegPath to bundled binary (relative to plugin)
 	if (!IsTemplate())
@@ -123,7 +123,7 @@ void UMoviePipelineAsymmetricStereoPass::TeardownImpl()
 {
 	// Cache output directory and framerate while the shot is still valid.
 	// BeginExportImpl runs after all shots are done, so GetCurrentShotIndex is no longer valid there.
-	if (bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None)
+	if (CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None)
 	{
 		UMoviePipelineOutputSetting* OutputSetting = GetPipeline()->FindOrAddSettingForShot<UMoviePipelineOutputSetting>(
 			GetPipeline()->GetActiveShotList()[GetPipeline()->GetCurrentShotIndex()]);
@@ -146,7 +146,7 @@ void UMoviePipelineAsymmetricStereoPass::BeginExportImpl()
 	// Called after all files have been finalized and written to disk.
 	// This is the correct place to run FFmpeg composite (not TeardownImpl,
 	// which runs before ProcessOutstandingFinishedFrames writes files).
-	if (bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None)
+	if (CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None)
 	{
 		bExportFinished = false;
 		RunFFmpegComposite();
@@ -251,10 +251,21 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 	const int32 EyeIdx = GetEyeIndex(CameraIndex);
 	const float EyeSign = (EyeIdx == 0) ? -1.0f : 1.0f;
 
-	// Calculate eye offset along camera right vector
-	const FRotator ViewRotation = OutCameraData.ViewInfo.Rotation;
-	const FVector RightVector = FRotationMatrix(ViewRotation).GetScaledAxis(EAxis::Y);
-	const FVector EyeOffset = RightVector * EyeSign * (EyeSeparation * 0.5f);
+	// Calculate eye offset along screen right vector (consistent with CalculateOffAxisProjection)
+	FVector EyeOffset;
+	if (CachedCameraComponent.IsValid())
+	{
+		FVector ScreenBL, ScreenBR, ScreenTL, ScreenTR;
+		CachedCameraComponent->GetEffectiveScreenCorners(ScreenBL, ScreenBR, ScreenTL, ScreenTR);
+		const FVector ScreenRight = (ScreenBR - ScreenBL).GetSafeNormal();
+		EyeOffset = ScreenRight * EyeSign * (EyeSeparation * 0.5f);
+	}
+	else
+	{
+		// No AsymmetricCameraComponent — fall back to camera right vector
+		const FVector RightVector = FRotationMatrix(OutCameraData.ViewInfo.Rotation).GetScaledAxis(EAxis::Y);
+		EyeOffset = RightVector * EyeSign * (EyeSeparation * 0.5f);
+	}
 
 	OutCameraData.ViewInfo.Location += EyeOffset;
 
@@ -383,23 +394,40 @@ void UMoviePipelineAsymmetricStereoPass::RunFFmpegComposite()
 	const FString FilterName = (StereoLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("hstack") : TEXT("vstack");
 	const FString LayoutName = (StereoLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("SBS") : TEXT("TB");
 
-	// Map enum settings to FFmpeg command-line strings
-	const FString Codec = GetFFmpegCodecString(VideoCodec);
-	const FString Fmt = GetFFmpegFormatString(OutputFormat);
-	const FString PixFmt = GetFFmpegPixFmtForCodec(VideoCodec);
-	const FString QualityArgs = GetFFmpegQualityArgs(VideoCodec, CompositeQuality);
-	const FString OutputPath = FPaths::Combine(OutputDir, FString::Printf(TEXT("stereo_%s.%s"), *LayoutName, *Fmt));
+	FString Args;
+	FString OutputPath;
 
-	FString Args = FString::Printf(
-		TEXT("-y -framerate %d -i \"%s\" -framerate %d -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" -c:v %s %s -pix_fmt %s \"%s\""),
-		FrameRate, *LeftInputPath,
-		FrameRate, *RightInputPath,
-		*FilterName,
-		*Codec,
-		*QualityArgs,
-		*PixFmt,
-		*OutputPath
-	);
+	if (CompositeMode == EAsymmetricCompositeMode::ImageSequence)
+	{
+		// Output merged image sequence — same format as input (png/jpeg/exr etc.)
+		FString OutputPattern = FString::Printf(TEXT("stereo_%s.%%0%dd%s"), *LayoutName, ZeroPad, *Extension);
+		OutputPath = FPaths::Combine(OutputDir, OutputPattern);
+
+		Args = FString::Printf(
+			TEXT("-y -i \"%s\" -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" \"%s\""),
+			*LeftInputPath, *RightInputPath, *FilterName, *OutputPath
+		);
+	}
+	else
+	{
+		// Output video file
+		const FString Codec = GetFFmpegCodecString(VideoCodec);
+		const FString Fmt = GetFFmpegFormatString(OutputFormat);
+		const FString PixFmt = GetFFmpegPixFmtForCodec(VideoCodec);
+		const FString QualityArgs = GetFFmpegQualityArgs(VideoCodec, CompositeQuality);
+		OutputPath = FPaths::Combine(OutputDir, FString::Printf(TEXT("stereo_%s.%s"), *LayoutName, *Fmt));
+
+		Args = FString::Printf(
+			TEXT("-y -framerate %d -i \"%s\" -framerate %d -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" -c:v %s %s -pix_fmt %s \"%s\""),
+			FrameRate, *LeftInputPath,
+			FrameRate, *RightInputPath,
+			*FilterName,
+			*Codec,
+			*QualityArgs,
+			*PixFmt,
+			*OutputPath
+		);
+	}
 
 	UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Running FFmpeg composite: %s %s"), *ResolvedFFmpegPath, *Args);
 
