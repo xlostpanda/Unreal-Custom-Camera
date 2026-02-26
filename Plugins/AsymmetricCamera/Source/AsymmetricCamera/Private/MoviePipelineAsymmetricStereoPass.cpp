@@ -20,12 +20,9 @@ namespace
 	{
 		switch (InCodec)
 		{
-		case EFFmpegVideoCodec::H264:   return TEXT("libx264");
-		case EFFmpegVideoCodec::H265:   return TEXT("libx265");
-		case EFFmpegVideoCodec::ProRes: return TEXT("prores_ks");
-		case EFFmpegVideoCodec::VP9:    return TEXT("libvpx-vp9");
-		case EFFmpegVideoCodec::AV1:    return TEXT("libsvtav1");
-		default:                        return TEXT("libx264");
+		case EFFmpegVideoCodec::H264: return TEXT("libx264");
+		case EFFmpegVideoCodec::H265: return TEXT("libx265");
+		default:                      return TEXT("libx264");
 		}
 	}
 
@@ -43,25 +40,43 @@ namespace
 
 	FString GetFFmpegPixFmtForCodec(EFFmpegVideoCodec InCodec)
 	{
-		// ProRes uses yuv422p10le, others use yuv420p
-		return (InCodec == EFFmpegVideoCodec::ProRes) ? TEXT("yuv422p10le") : TEXT("yuv420p");
+		return TEXT("yuv420p");
 	}
 
 	FString GetFFmpegQualityArgs(EFFmpegVideoCodec InCodec, int32 InCRF)
 	{
+		return FString::Printf(TEXT("-crf %d"), InCRF);
+	}
+
+	FString GetStereoMetadataArgs(EFFmpegVideoCodec InCodec, EAsymmetricStereoLayout InLayout)
+	{
 		switch (InCodec)
 		{
-		case EFFmpegVideoCodec::ProRes:
-			// ProRes uses -profile:v instead of -crf. Map CRF 0-51 to profile 0-5
+		case EFFmpegVideoCodec::H264:
 			{
-				int32 Profile = FMath::Clamp(InCRF * 5 / 51, 0, 5);
-				return FString::Printf(TEXT("-profile:v %d"), Profile);
+				// H.264 Frame Packing Arrangement SEI: 3=side-by-side, 4=top-bottom
+				const int32 FramePackingType = (InLayout == EAsymmetricStereoLayout::SideBySide) ? 3 : 4;
+				return FString::Printf(TEXT("-x264-params frame-packing=%d"), FramePackingType);
 			}
-		case EFFmpegVideoCodec::VP9:
-			return FString::Printf(TEXT("-crf %d -b:v 0"), InCRF);
+		case EFFmpegVideoCodec::H265:
+			{
+				// x265 has no frame-packing CLI param; use MKV container stereo_mode metadata
+				const TCHAR* StereoMode = (InLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("side_by_side_left") : TEXT("top_bottom_left");
+				return FString::Printf(TEXT("-metadata:s:v stereo_mode=%s"), StereoMode);
+			}
 		default:
-			return FString::Printf(TEXT("-crf %d"), InCRF);
+			return FString();
 		}
+	}
+
+	FString GetOutputFormat(EFFmpegVideoCodec InCodec, EFFmpegOutputFormat InFormat)
+	{
+		// H.265 forces MKV container for stereo_mode metadata support
+		if (InCodec == EFFmpegVideoCodec::H265)
+		{
+			return TEXT("mkv");
+		}
+		return GetFFmpegFormatString(InFormat);
 	}
 }
 
@@ -72,11 +87,11 @@ UMoviePipelineAsymmetricStereoPass::UMoviePipelineAsymmetricStereoPass()
 	StereoLayout = EAsymmetricStereoLayout::SideBySide;
 	EyeSeparation = 6.4f;
 	bSwapEyes = false;
-	bAutoComposite = true;
+	CompositeMode = EAsymmetricCompositeMode::ImageSequence;
 	VideoCodec = EFFmpegVideoCodec::H264;
 	CompositeQuality = 18;
 	OutputFormat = EFFmpegOutputFormat::MP4;
-	bDeleteSourceAfterComposite = false;
+	bDeleteSourceAfterComposite = true;
 
 	// Set default FFmpegPath to bundled binary (relative to plugin)
 	if (!IsTemplate())
@@ -123,7 +138,7 @@ void UMoviePipelineAsymmetricStereoPass::TeardownImpl()
 {
 	// Cache output directory and framerate while the shot is still valid.
 	// BeginExportImpl runs after all shots are done, so GetCurrentShotIndex is no longer valid there.
-	if (bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None)
+	if (CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None)
 	{
 		UMoviePipelineOutputSetting* OutputSetting = GetPipeline()->FindOrAddSettingForShot<UMoviePipelineOutputSetting>(
 			GetPipeline()->GetActiveShotList()[GetPipeline()->GetCurrentShotIndex()]);
@@ -146,7 +161,7 @@ void UMoviePipelineAsymmetricStereoPass::BeginExportImpl()
 	// Called after all files have been finalized and written to disk.
 	// This is the correct place to run FFmpeg composite (not TeardownImpl,
 	// which runs before ProcessOutstandingFinishedFrames writes files).
-	if (bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None)
+	if (CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None)
 	{
 		bExportFinished = false;
 		RunFFmpegComposite();
@@ -251,10 +266,21 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 	const int32 EyeIdx = GetEyeIndex(CameraIndex);
 	const float EyeSign = (EyeIdx == 0) ? -1.0f : 1.0f;
 
-	// Calculate eye offset along camera right vector
-	const FRotator ViewRotation = OutCameraData.ViewInfo.Rotation;
-	const FVector RightVector = FRotationMatrix(ViewRotation).GetScaledAxis(EAxis::Y);
-	const FVector EyeOffset = RightVector * EyeSign * (EyeSeparation * 0.5f);
+	// Calculate eye offset along screen right vector (consistent with CalculateOffAxisProjection)
+	FVector EyeOffset;
+	if (CachedCameraComponent.IsValid())
+	{
+		FVector ScreenBL, ScreenBR, ScreenTL, ScreenTR;
+		CachedCameraComponent->GetEffectiveScreenCorners(ScreenBL, ScreenBR, ScreenTL, ScreenTR);
+		const FVector ScreenRight = (ScreenBR - ScreenBL).GetSafeNormal();
+		EyeOffset = ScreenRight * EyeSign * (EyeSeparation * 0.5f);
+	}
+	else
+	{
+		// No AsymmetricCameraComponent — fall back to camera right vector
+		const FVector RightVector = FRotationMatrix(OutCameraData.ViewInfo.Rotation).GetScaledAxis(EAxis::Y);
+		EyeOffset = RightVector * EyeSign * (EyeSeparation * 0.5f);
+	}
 
 	OutCameraData.ViewInfo.Location += EyeOffset;
 
@@ -383,23 +409,42 @@ void UMoviePipelineAsymmetricStereoPass::RunFFmpegComposite()
 	const FString FilterName = (StereoLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("hstack") : TEXT("vstack");
 	const FString LayoutName = (StereoLayout == EAsymmetricStereoLayout::SideBySide) ? TEXT("SBS") : TEXT("TB");
 
-	// Map enum settings to FFmpeg command-line strings
-	const FString Codec = GetFFmpegCodecString(VideoCodec);
-	const FString Fmt = GetFFmpegFormatString(OutputFormat);
-	const FString PixFmt = GetFFmpegPixFmtForCodec(VideoCodec);
-	const FString QualityArgs = GetFFmpegQualityArgs(VideoCodec, CompositeQuality);
-	const FString OutputPath = FPaths::Combine(OutputDir, FString::Printf(TEXT("stereo_%s.%s"), *LayoutName, *Fmt));
+	FString Args;
+	FString OutputPath;
 
-	FString Args = FString::Printf(
-		TEXT("-y -framerate %d -i \"%s\" -framerate %d -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" -c:v %s %s -pix_fmt %s \"%s\""),
-		FrameRate, *LeftInputPath,
-		FrameRate, *RightInputPath,
-		*FilterName,
-		*Codec,
-		*QualityArgs,
-		*PixFmt,
-		*OutputPath
-	);
+	if (CompositeMode == EAsymmetricCompositeMode::ImageSequence)
+	{
+		// Output merged image sequence — same format as input (png/jpeg/exr etc.)
+		FString OutputPattern = FString::Printf(TEXT("stereo_%s.%%0%dd%s"), *LayoutName, ZeroPad, *Extension);
+		OutputPath = FPaths::Combine(OutputDir, OutputPattern);
+
+		Args = FString::Printf(
+			TEXT("-y -i \"%s\" -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" \"%s\""),
+			*LeftInputPath, *RightInputPath, *FilterName, *OutputPath
+		);
+	}
+	else
+	{
+		// Output video file
+		const FString Codec = GetFFmpegCodecString(VideoCodec);
+		const FString Fmt = GetOutputFormat(VideoCodec, OutputFormat);
+		const FString PixFmt = GetFFmpegPixFmtForCodec(VideoCodec);
+		const FString QualityArgs = GetFFmpegQualityArgs(VideoCodec, CompositeQuality);
+		const FString StereoArgs = GetStereoMetadataArgs(VideoCodec, StereoLayout);
+		OutputPath = FPaths::Combine(OutputDir, FString::Printf(TEXT("stereo_%s.%s"), *LayoutName, *Fmt));
+
+		Args = FString::Printf(
+			TEXT("-y -framerate %d -i \"%s\" -framerate %d -i \"%s\" -filter_complex \"[0:v][1:v]%s=inputs=2\" -c:v %s %s -pix_fmt %s %s \"%s\""),
+			FrameRate, *LeftInputPath,
+			FrameRate, *RightInputPath,
+			*FilterName,
+			*Codec,
+			*QualityArgs,
+			*PixFmt,
+			*StereoArgs,
+			*OutputPath
+		);
+	}
 
 	UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Running FFmpeg composite: %s %s"), *ResolvedFFmpegPath, *Args);
 

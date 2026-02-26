@@ -129,22 +129,28 @@ AAsymmetricCameraActor
 ### 设置步骤
 
 1. 在 MRQ Job 的 **Render Pass** 中，移除默认的 "Deferred Rendering"，添加 **Asymmetric Stereo Pass**
-2. 配置参数：
+2. 配置参数（见下表）
+3. 输出设置的文件名模板中包含 `{camera_name}`（自动填充 LeftEye / RightEye）
+4. 渲染完成后自动合成 SBS/TB 视频到输出目录
+
+**Pass 参数：**
 
 | 参数 | 说明 |
 | ---- | ---- |
 | `StereoLayout` | Side by Side（左右）或 Top / Bottom（上下） |
 | `EyeSeparation` | 眼间距，单位厘米，默认 6.4 |
 | `bSwapEyes` | 交换左右眼 |
-| `bAutoComposite` | 渲染完成后自动调用 FFmpeg 合成（默认开启） |
+| `CompositeMode` | 合成模式：`Disabled`（保留分离序列）/ `ImageSequence`（每帧合并图片）/ `Video`（合并视频） |
 | `FFmpegPath` | FFmpeg 路径，留空则使用插件内置的 FFmpeg（支持文件选择器） |
-| `VideoCodec` | 视频编码器：H.264 / H.265 / ProRes / VP9 / AV1 |
+| `VideoCodec` | 视频编码器：H.264 / H.265 |
 | `CompositeQuality` | CRF 质量值（0=无损，18=推荐，51=最差） |
-| `OutputFormat` | 输出格式：MP4 / MOV / MKV / AVI |
+| `OutputFormat` | 输出格式：MP4 / MOV / MKV / AVI（H.265 强制使用 MKV） |
 | `bDeleteSourceAfterComposite` | 合成成功后自动删除左右眼源图片序列 |
 
-3. 输出设置的文件名模板中包含 `{camera_name}`（自动填充 LeftEye / RightEye）
-4. 渲染完成后自动合成 SBS/TB 视频到输出目录
+> **立体 3D 元数据：**
+>
+> - H.264 输出在码流中嵌入 Frame Packing Arrangement SEI（type 3=SBS / type 4=TB），VLC、PotPlayer 等播放器可自动识别。
+> - H.265 输出强制使用 MKV 容器，通过 `stereo_mode` 容器元数据标记立体格式（x265 不支持 frame-packing CLI 参数）。
 
 ### FFmpeg
 

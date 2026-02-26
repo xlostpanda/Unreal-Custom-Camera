@@ -18,7 +18,7 @@ class UAsymmetricCameraComponent;
  * 1. Add this pass to your MRQ job (replaces default Deferred Rendering)
  * 2. Set StereoLayout and EyeSeparation
  * 3. Include {camera_name} in output filename to distinguish LeftEye/RightEye
- * 4. Enable bAutoComposite to auto-merge with FFmpeg after render
+ * 4. Set CompositeMode to ImageSequence or Video to auto-merge with FFmpeg after render
  */
 UCLASS(BlueprintType)
 class ASYMMETRICCAMERA_API UMoviePipelineAsymmetricStereoPass : public UMoviePipelineDeferredPassBase
@@ -40,28 +40,42 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo", meta = (EditCondition = "StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "交换左右眼输出。如果发现左右眼反了可以开启"))
 	bool bSwapEyes;
 
-	/** Automatically call FFmpeg to composite SBS/TB after rendering */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (EditCondition = "StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "渲染完成后自动调用 FFmpeg 合成左右眼为一个视频文件"))
-	bool bAutoComposite;
+	/** FFmpeg composite mode: Disabled keeps separate eye sequences, ImageSequence outputs one merged image per frame, Video outputs a merged video file */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "Disabled=保留左右眼分离序列；Image Sequence=每帧输出一张合并图；Video=输出合并视频文件"))
+	EAsymmetricCompositeMode CompositeMode;
 
 	/** Path to FFmpeg executable. Leave empty to use bundled or system PATH. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (EditCondition = "bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None", FilePathFilter = "exe", ToolTip = "FFmpeg 可执行文件路径。留空则自动使用插件自带的 FFmpeg 或系统 PATH 中的 FFmpeg"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None",
+			FilePathFilter = "exe",
+			ToolTip = "FFmpeg 可执行文件路径。留空则自动使用插件自带的 FFmpeg 或系统 PATH 中的 FFmpeg"))
 	FFilePath FFmpegPath;
 
 	/** Video codec for composite output */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (EditCondition = "bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "合成视频编码器。H.264 兼容性最好，H.265 压缩率更高，ProRes 适合后期剪辑"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "CompositeMode == EAsymmetricCompositeMode::Video && StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "合成视频编码器。H.264 兼容性最好，H.265 压缩率更高，ProRes 适合后期剪辑"))
 	EFFmpegVideoCodec VideoCodec;
 
 	/** CRF quality (0=lossless, 23=default, 51=worst). Lower is better. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (ClampMin = "0", ClampMax = "51", EditCondition = "bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "视频质量 CRF 值。0=无损，18=高质量（推荐），23=默认，51=最差。数值越小质量越高、文件越大"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (ClampMin = "0", ClampMax = "51",
+			EditCondition = "CompositeMode == EAsymmetricCompositeMode::Video && StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "视频质量 CRF 值。0=无损，18=高质量（推荐），23=默认，51=最差。数值越小质量越高、文件越大"))
 	int32 CompositeQuality;
 
 	/** Output container format */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (EditCondition = "bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "输出容器格式。MP4 兼容性最好，MOV 适合 Apple 生态，MKV 支持更多编码格式"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "CompositeMode == EAsymmetricCompositeMode::Video && StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "输出容器格式。MP4 兼容性最好，MOV 适合 Apple 生态，MKV 支持更多编码格式"))
 	EFFmpegOutputFormat OutputFormat;
 
 	/** Delete left/right eye source sequences after successful composite */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg", meta = (EditCondition = "bAutoComposite && StereoLayout != EAsymmetricStereoLayout::None", ToolTip = "合成成功后自动删除左右眼源图片序列，仅保留合成视频"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "合成成功后自动删除左右眼源图片序列，仅保留合成结果"))
 	bool bDeleteSourceAfterComposite;
 
 protected:

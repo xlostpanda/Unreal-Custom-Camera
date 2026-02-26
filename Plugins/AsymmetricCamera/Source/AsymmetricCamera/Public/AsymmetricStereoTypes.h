@@ -14,15 +14,21 @@ enum class EAsymmetricStereoLayout : uint8
 	TopBottom   UMETA(DisplayName = "Top / Bottom")
 };
 
+/** FFmpeg composite output mode */
+UENUM(BlueprintType)
+enum class EAsymmetricCompositeMode : uint8
+{
+	Disabled        UMETA(DisplayName = "Disabled"),        // Keep separate LeftEye/RightEye sequences
+	ImageSequence   UMETA(DisplayName = "Image Sequence"),  // One merged SBS/TB image per frame
+	Video           UMETA(DisplayName = "Video")            // Merged video file
+};
+
 /** FFmpeg video codec for stereo composite output */
 UENUM(BlueprintType)
 enum class EFFmpegVideoCodec : uint8
 {
 	H264        UMETA(DisplayName = "H.264 (libx264)"),
-	H265        UMETA(DisplayName = "H.265 (libx265)"),
-	ProRes      UMETA(DisplayName = "ProRes (prores_ks)"),
-	VP9         UMETA(DisplayName = "VP9 (libvpx-vp9)"),
-	AV1         UMETA(DisplayName = "AV1 (libsvtav1)")
+	H265        UMETA(DisplayName = "H.265 (libx265)")
 };
 
 /** FFmpeg output container format */

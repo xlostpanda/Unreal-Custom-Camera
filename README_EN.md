@@ -129,22 +129,28 @@ The plugin provides an `Asymmetric Stereo Pass` for rendering stereo video (Side
 ### Setup
 
 1. In the MRQ Job's **Render Pass** section, remove the default "Deferred Rendering" and add **Asymmetric Stereo Pass**
-2. Configure the pass parameters:
+2. Configure the pass parameters (see table below)
+3. Include `{camera_name}` in the output filename template (auto-filled with LeftEye / RightEye)
+4. After rendering, the plugin automatically composites SBS/TB video into the output directory
+
+**Pass parameters:**
 
 | Parameter | Description |
 | --------- | ----------- |
 | `StereoLayout` | Side by Side (LR) or Top / Bottom (LR) |
 | `EyeSeparation` | Inter-ocular distance in centimeters (default 6.4) |
 | `bSwapEyes` | Swap left and right eye output |
-| `bAutoComposite` | Auto-run FFmpeg to composite after rendering (on by default) |
+| `CompositeMode` | Composite mode: `Disabled` (keep separate sequences) / `ImageSequence` (one merged image per frame) / `Video` (merged video file) |
 | `FFmpegPath` | Path to FFmpeg executable; leave empty to use the bundled one (file picker supported) |
-| `VideoCodec` | Video encoder: H.264 / H.265 / ProRes / VP9 / AV1 |
+| `VideoCodec` | Video encoder: H.264 / H.265 |
 | `CompositeQuality` | CRF quality value (0=lossless, 18=recommended, 51=worst) |
-| `OutputFormat` | Output format: MP4 / MOV / MKV / AVI |
+| `OutputFormat` | Output format: MP4 / MOV / MKV / AVI (H.265 forces MKV) |
 | `bDeleteSourceAfterComposite` | Auto-delete left/right eye source sequences after successful composite |
 
-3. Include `{camera_name}` in the output filename template (auto-filled with LeftEye / RightEye)
-4. After rendering, the plugin automatically composites SBS/TB video into the output directory
+> **Stereo 3D metadata:**
+>
+> - H.264 output embeds a Frame Packing Arrangement SEI in the bitstream (type 3=SBS / type 4=TB), recognized automatically by VLC, PotPlayer, etc.
+> - H.265 output forces MKV container and uses `stereo_mode` container metadata (x265 has no frame-packing CLI parameter).
 
 ### FFmpeg
 
