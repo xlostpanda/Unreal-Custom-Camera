@@ -56,7 +56,7 @@ public:
 	/** Video codec for composite output */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
 		meta = (EditCondition = "CompositeMode == EAsymmetricCompositeMode::Video && StereoLayout != EAsymmetricStereoLayout::None",
-			ToolTip = "合成视频编码器。H.264 兼容性最好，H.265 压缩率更高，ProRes 适合后期剪辑"))
+			ToolTip = "合成视频编码器。H.264 兼容性最好，H.265 压缩率更高"))
 	EFFmpegVideoCodec VideoCodec;
 
 	/** CRF quality (0=lossless, 23=default, 51=worst). Lower is better. */

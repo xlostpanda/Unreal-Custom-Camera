@@ -89,6 +89,7 @@ The screen plane lies on the component's local YZ plane with the normal along +X
 | `bShowEyeHandle` | Eye position sphere (yellow) |
 | `bShowNearPlane` | Near clipping plane rectangle (red) |
 | `bShowLabels` | Corner labels and screen info text |
+| `bShowStereoFrustums` | Show both left (cyan) and right (magenta) eye frustums simultaneously to verify stereo parallax (requires EyeSeparation > 0) |
 | `bShowDebugInGame` | Show debug lines during gameplay |
 
 ## Blueprint API
@@ -119,6 +120,7 @@ Implements Robert Kooima's **Generalized Perspective Projection** algorithm:
 5. Render with Movie Render Queue — the output uses asymmetric projection while the animation is driven by the CineCameraActor
 
 > **Note:**
+>
 > - Motion blur is fully supported — the plugin automatically tracks previous-frame camera transforms for correct velocity buffer calculation.
 > - MRQ high-resolution tiling is not compatible with asymmetric projection. Set tiling to 1×1.
 

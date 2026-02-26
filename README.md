@@ -89,6 +89,7 @@ AAsymmetricCameraActor
 | `bShowEyeHandle` | 眼球位置球体（黄色） |
 | `bShowNearPlane` | 近裁切面矩形（红色） |
 | `bShowLabels` | 角点标签和屏幕信息文字 |
+| `bShowStereoFrustums` | 同时显示左眼（青色）和右眼（品红色）视锥，验证立体视差（需要 EyeSeparation > 0） |
 | `bShowDebugInGame` | 游戏运行时显示调试线 |
 
 ## 蓝图 API
