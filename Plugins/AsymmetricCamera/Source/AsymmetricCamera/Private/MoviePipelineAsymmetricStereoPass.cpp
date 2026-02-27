@@ -284,26 +284,22 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 
 	OutCameraData.ViewInfo.Location += EyeOffset;
 
-	// If we have an AsymmetricCameraComponent, use its projection
+	// If we have an AsymmetricCameraComponent, use its projection.
+	// EyePosition is already the offset world-space position (applied above),
+	// so CalculateOffAxisProjection must not apply any additional internal offset.
+	// ComponentEyeSeparation must be 0 for MRQ stereo; the IPD is controlled by
+	// this pass's EyeSeparation property only.
 	if (CachedCameraComponent.IsValid() && CachedCameraComponent->bUseAsymmetricProjection)
 	{
 		FVector EyePosition = OutCameraData.ViewInfo.Location;
 		FRotator ProjViewRotation;
 		FMatrix ProjectionMatrix;
 
-		// Temporarily set EyeOffset on the component for projection calculation
-		UAsymmetricCameraComponent* Comp = CachedCameraComponent.Get();
-		const float OrigEyeOffset = Comp->EyeOffset;
-		Comp->EyeOffset = EyeSign;
-
-		if (Comp->CalculateOffAxisProjection(EyePosition, ProjViewRotation, ProjectionMatrix))
+		if (CachedCameraComponent->CalculateOffAxisProjection(EyePosition, ProjViewRotation, ProjectionMatrix))
 		{
 			OutCameraData.bUseCustomProjectionMatrix = true;
 			OutCameraData.CustomProjectionMatrix = ProjectionMatrix;
 		}
-
-		// Restore original EyeOffset
-		Comp->EyeOffset = OrigEyeOffset;
 	}
 
 	return OutCameraData;
