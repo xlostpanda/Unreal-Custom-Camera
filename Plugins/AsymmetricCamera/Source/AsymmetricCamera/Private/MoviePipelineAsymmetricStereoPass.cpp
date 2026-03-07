@@ -83,15 +83,21 @@ namespace
 		return GetFFmpegFormatString(InFormat);
 	}
 
-	/** Resolve FFmpeg executable: user override > bundled binary > system PATH */
+	/** Resolve FFmpeg executable: user override > bundled binary > system PATH.
+	 *  Always returns an absolute path so CreateProcess can locate the binary. */
 	FString ResolveFFmpegPath(const FFilePath& UserPath)
 	{
-		if (!UserPath.FilePath.IsEmpty() && FPaths::FileExists(UserPath.FilePath))
+		if (!UserPath.FilePath.IsEmpty())
 		{
-			return UserPath.FilePath;
+			FString Abs = FPaths::ConvertRelativePathToFull(UserPath.FilePath);
+			if (FPaths::FileExists(Abs))
+			{
+				return Abs;
+			}
 		}
 
-		FString ModulePath = FPaths::GetPath(FModuleManager::Get().GetModuleFilename(TEXT("AsymmetricCamera")));
+		FString ModulePath = FPaths::ConvertRelativePathToFull(
+			FPaths::GetPath(FModuleManager::Get().GetModuleFilename(TEXT("AsymmetricCamera"))));
 		FString PluginRoot  = FPaths::GetPath(FPaths::GetPath(ModulePath));
 		FString BundledPath = FPaths::Combine(PluginRoot, TEXT("ThirdParty"), TEXT("FFmpeg"), TEXT("Win64"), TEXT("ffmpeg.exe"));
 		FPaths::NormalizeFilename(BundledPath);
@@ -126,7 +132,8 @@ UMoviePipelineAsymmetricStereoPass::UMoviePipelineAsymmetricStereoPass()
 
 	if (!IsTemplate())
 	{
-		FString ModulePath  = FPaths::GetPath(FModuleManager::Get().GetModuleFilename(TEXT("AsymmetricCamera")));
+		FString ModulePath  = FPaths::ConvertRelativePathToFull(
+			FPaths::GetPath(FModuleManager::Get().GetModuleFilename(TEXT("AsymmetricCamera"))));
 		FString PluginRoot  = FPaths::GetPath(FPaths::GetPath(ModulePath));
 		FString BundledPath = FPaths::Combine(PluginRoot, TEXT("ThirdParty"), TEXT("FFmpeg"), TEXT("Win64"), TEXT("ffmpeg.exe"));
 		FPaths::NormalizeFilename(BundledPath);
