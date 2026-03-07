@@ -1,4 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
+// Compatible with Unreal Engine 5.4+
 
 using UnrealBuildTool;
 

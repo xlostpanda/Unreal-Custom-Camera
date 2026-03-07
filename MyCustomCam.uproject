@@ -19,10 +19,6 @@
 			]
 		},
 		{
-			"Name": "GraphNUnrealPlugin",
-			"Enabled": true
-		},
-		{
 			"Name": "MovieRenderPipeline",
 			"Enabled": true
 		}
