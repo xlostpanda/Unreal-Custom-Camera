@@ -1,0 +1,10 @@
+{
+  "clangd.arguments": [
+    "--compile-commands-dir=D:/UE/UE/UE_5.4",
+    "--background-index",
+    "--clang-tidy=false",
+    "--header-insertion=never",
+    "--log=error"
+  ],
+  "clangd.path": "D:/VS2022/VC/Tools/Llvm/x64/bin/clangd.exe"
+}
