@@ -5,9 +5,24 @@
 #include "CoreMinimal.h"
 #include "MoviePipelineDeferredPasses.h"
 #include "AsymmetricStereoTypes.h"
+#include "Misc/FrameRate.h"
+#include "Misc/Paths.h"
 #include "MoviePipelineAsymmetricStereoPass.generated.h"
 
 class UAsymmetricCameraComponent;
+
+/**
+ * Per-shot record: exact file paths extracted from MRQ output data in BeginExportImpl.
+ * No directory scanning or filename pattern guessing required.
+ */
+struct FShotCompositeRecord
+{
+	TArray<FString> LeftEyePaths;   // Absolute paths, sorted in frame order
+	TArray<FString> RightEyePaths;  // Absolute paths, sorted in frame order
+	FString         OutputDir;
+	FFrameRate      FrameRate;
+	FString         ShotName;
+};
 
 /**
  * MRQ render pass that renders left and right eye views for stereo output.
@@ -46,11 +61,13 @@ public:
 			ToolTip = "Disabled=保留左右眼分离序列；Image Sequence=每帧输出一张合并图；Video=输出合并视频文件"))
 	EAsymmetricCompositeMode CompositeMode;
 
-	/** Path to FFmpeg executable. Leave empty to use bundled or system PATH. */
+	/** Path to FFmpeg executable.
+	 *  Click "..." to browse, or type an absolute path directly.
+	 *  Leave empty to use "ffmpeg" from the system PATH. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
 		meta = (EditCondition = "CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None",
 			FilePathFilter = "exe",
-			ToolTip = "FFmpeg 可执行文件路径。留空则自动使用插件自带的 FFmpeg 或系统 PATH 中的 FFmpeg"))
+			ToolTip = "FFmpeg 可执行文件路径。点击 ... 按钮浏览选择，或直接输入绝对路径，例如 D:/tools/ffmpeg/bin/ffmpeg.exe。留空则使用系统 PATH 中的 ffmpeg。"))
 	FFilePath FFmpegPath;
 
 	/** Video codec for composite output */
@@ -78,6 +95,13 @@ public:
 			ToolTip = "合成成功后自动删除左右眼源图片序列，仅保留合成结果"))
 	bool bDeleteSourceAfterComposite;
 
+	/** Keep concat list files and FFmpeg log files on disk for debugging.
+	 *  When disabled (default), these temporary files are deleted after composite. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
+		meta = (EditCondition = "CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None",
+			ToolTip = "调试模式：保留 concat 列表文件和 FFmpeg 日志文件（_concat_*.txt / _ffmpeg_log_*.txt）。默认关闭，出现合成问题时可开启排查。"))
+	bool bDebugSaveConcatFiles;
+
 protected:
 	// UMoviePipelineDeferredPassBase overrides
 	virtual void SetupImpl(const MoviePipeline::FMoviePipelineRenderPassInitSettings& InPassInitSettings) override;
@@ -90,7 +114,7 @@ protected:
 	virtual UE::MoviePipeline::FImagePassCameraViewData GetCameraInfo(FMoviePipelineRenderPassMetrics& InOutSampleState, IViewCalcPayload* OptPayload = nullptr) const override;
 	virtual void BlendPostProcessSettings(FSceneView* InView, FMoviePipelineRenderPassMetrics& InOutSampleState, IViewCalcPayload* OptPayload = nullptr) override;
 
-	// UMoviePipelineSetting overrides - post-finalize export (runs after all files are written to disk)
+	// Post-finalize export — runs after all files are written to disk
 	virtual void BeginExportImpl() override;
 	virtual bool HasFinishedExportingImpl() override;
 
@@ -103,21 +127,35 @@ private:
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UAsymmetricCameraComponent> CachedCameraComponent;
 
-	/** Run FFmpeg to composite left/right eye sequences */
-	void RunFFmpegComposite();
-
 	/** Get the eye index accounting for bSwapEyes */
 	int32 GetEyeIndex(const int32 InCameraIndex) const;
 
-	/** Handle to the running FFmpeg process (for async tracking) */
+	// ── FFmpeg composite queue ───────────────────────────────────────────────
+
+	/** Build CompositeQueue by inspecting MRQ output data (called from BeginExportImpl) */
+	void BuildCompositeQueue();
+
+	/** Launch FFmpeg for the shot at CompositeQueue[CurrentCompositeIndex] */
+	void LaunchFFmpegForShot(const FShotCompositeRecord& Record);
+
+	/** Write a concat demuxer list file; returns the path on success, empty string on failure */
+	FString WriteConcatList(const TArray<FString>& FilePaths, const FString& ListFilePath) const;
+
+	/** Delete source eye files for a completed shot record */
+	void DeleteSourceFiles(const FShotCompositeRecord& Record) const;
+
+	/** Per-shot records built in BeginExportImpl from MRQ output data */
+	TArray<FShotCompositeRecord> CompositeQueue;
+
+	/** Handle to the running FFmpeg process */
 	FProcHandle ActiveFFmpegProcess;
 
-	/** Whether the FFmpeg export has completed */
+	/** Index into CompositeQueue of the shot currently being composited */
+	int32 CurrentCompositeIndex = 0;
+
+	/** Whether all FFmpeg exports have completed */
 	bool bExportFinished = true;
 
-	/** Cached output directory (resolved during TeardownImpl while shot is still valid) */
-	FString CachedOutputDir;
-
-	/** Cached output framerate */
-	int32 CachedFrameRate = 24;
+	/** Temporary concat list files written to disk; cleaned up after all shots finish */
+	TArray<FString> TempConcatFiles;
 };

@@ -219,11 +219,27 @@ AAsymmetricCameraActor
 
 ### 合成输出命名规则
 
+输出文件名包含布局模式和 Shot 名称，Shot 名称取自 Sequencer 中的 Shot Section 名称（如 `shot0000`）：
+
 | 模式 | 输出文件名示例 |
 | ---- | ---- |
-| `Image Sequence` | `stereo_SBS.0000.jpeg`、`stereo_TB.0000.png` |
-| `Video` (SBS) | `stereo_SBS.mp4` |
-| `Video` (TB) | `stereo_TB.mkv`（H.265） |
+| `Image Sequence` | `stereo_SBS_shot0000_%05d.jpeg`、`stereo_TB_shot0001_%05d.png` |
+| `Video` (SBS) | `stereo_SBS_shot0000.mp4` |
+| `Video` (TB) | `stereo_TB_shot0000.mkv`（H.265） |
+
+多个 Shot 会各自生成独立的合成文件，按顺序串行处理。
+
+### 合成机制
+
+合成使用 FFmpeg 的 **concat demuxer**，通过临时文件列表明确指定每帧的文件路径，而非依赖帧号模式（`%04d`）。这意味着：
+
+- **帧号起始值无关** — Handle Frames、中段 Shot、任意起始帧号均可正确处理
+- **文件名格式无关** — 不要求文件名使用特定分隔符或零填充位数
+- **不连续帧安全** — 部分帧重渲染、跳帧场景不会导致合成失败
+- **多 Shot 全覆盖** — 每个 Shot 独立合成，不再只处理最后一个 Shot
+- **精确帧率** — 使用 `Numerator/Denominator` 分数形式（如 `24000/1001` 表示 23.976 fps）
+
+唯一的要求：输出文件名模板中必须包含 `{camera_name}`，以便区分 LeftEye 和 RightEye 文件。
 
 ### FFmpeg
 
