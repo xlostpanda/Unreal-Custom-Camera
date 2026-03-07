@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "name": "Win64",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "D:/UE/UE/UE_5.4/Engine/Source/**",
+        "D:/UE/UE/UE_5.4/Engine/Plugins/**"
+      ],
+      "defines": [
+        "UE_BUILD_DEVELOPMENT=1",
+        "WITH_EDITOR=1",
+        "WITH_ENGINE=1",
+        "WITH_UNREAL_DEVELOPER_TOOLS=1",
+        "UNICODE",
+        "_UNICODE",
+        "WIN32",
+        "_WIN64"
+      ],
+      "compilerPath": "cl.exe",
+      "cppStandard": "c++20",
+      "intelliSenseMode": "windows-msvc-x64",
+      "windowsSdkVersion": "10.0"
+    }
+  ],
+  "version": 4
+}
