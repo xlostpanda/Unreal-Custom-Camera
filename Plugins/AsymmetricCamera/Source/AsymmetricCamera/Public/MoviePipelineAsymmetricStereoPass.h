@@ -62,12 +62,13 @@ public:
 	EAsymmetricCompositeMode CompositeMode;
 
 	/** Path to FFmpeg executable.
-	 *  Enter an absolute path, e.g. D:/tools/ffmpeg/bin/ffmpeg.exe
+	 *  Click "..." to browse, or type an absolute path directly.
 	 *  Leave empty to use "ffmpeg" from the system PATH. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",
 		meta = (EditCondition = "CompositeMode != EAsymmetricCompositeMode::Disabled && StereoLayout != EAsymmetricStereoLayout::None",
-			ToolTip = "FFmpeg 可执行文件路径，例如 D:/tools/ffmpeg/bin/ffmpeg.exe。留空则使用系统 PATH 中的 ffmpeg。直接输入完整路径，避免使用文件选择器（选择器可能改变路径格式）。"))
-	FString FFmpegPath;
+			FilePathFilter = "exe",
+			ToolTip = "FFmpeg 可执行文件路径。点击 ... 按钮浏览选择，或直接输入绝对路径，例如 D:/tools/ffmpeg/bin/ffmpeg.exe。留空则使用系统 PATH 中的 ffmpeg。"))
+	FFilePath FFmpegPath;
 
 	/** Video codec for composite output */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stereo|FFmpeg",

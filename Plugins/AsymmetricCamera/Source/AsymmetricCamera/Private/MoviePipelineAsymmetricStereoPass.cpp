@@ -85,13 +85,13 @@ namespace
 		return GetFFmpegFormatString(InFormat);
 	}
 
-	/** Resolve FFmpeg executable path.
-	 *  Accepts the user-specified path as-is (should be absolute).
-	 *  If it looks like a relative path, converts to absolute against CWD.
-	 *  Falls back to "ffmpeg" (system PATH) if empty. */
-	FString ResolveFFmpegPath(const FString& UserPath)
+	/** Resolve FFmpeg executable path from an FFilePath property.
+	 *  Always converts to an absolute path — the editor file picker may store
+	 *  an absolute path or (rarely) a path relative to the project directory.
+	 *  Falls back to "ffmpeg" (system PATH) if the field is empty. */
+	FString ResolveFFmpegPath(const FFilePath& UserPath)
 	{
-		if (UserPath.IsEmpty())
+		if (UserPath.FilePath.IsEmpty())
 		{
 			UE_LOG(LogAsymmetricStereoPass, Warning,
 				TEXT("FFmpegPath is empty — falling back to system PATH. "
@@ -99,15 +99,16 @@ namespace
 			return TEXT("ffmpeg");
 		}
 
-		// If user entered a relative path, make it absolute so CreateProc can find it
-		FString Resolved = UserPath;
+		// Ensure the path is always absolute regardless of how the editor stored it
+		FString Resolved = UserPath.FilePath;
 		if (FPaths::IsRelative(Resolved))
 		{
 			Resolved = FPaths::ConvertRelativePathToFull(Resolved);
 			UE_LOG(LogAsymmetricStereoPass, Warning,
-				TEXT("FFmpegPath was relative, resolved to: %s"), *Resolved);
+				TEXT("FFmpegPath was relative, resolved to absolute: %s"), *Resolved);
 		}
 
+		FPaths::NormalizeFilename(Resolved);
 		UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Using FFmpeg: %s"), *Resolved);
 		return Resolved;
 	}
