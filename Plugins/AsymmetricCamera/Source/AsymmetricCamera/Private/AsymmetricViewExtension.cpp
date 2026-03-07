@@ -8,6 +8,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogAsymmetricCamera, Log, All);
 
+// 调试日志计数器：只在前几帧打印，避免每帧刷屏
 static int32 GAsymmetricDebugLogFrames = 0;
 
 FAsymmetricViewExtension::FAsymmetricViewExtension(
@@ -21,6 +22,7 @@ FAsymmetricViewExtension::FAsymmetricViewExtension(
 
 void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionData& InOutProjectionData)
 {
+	// 运行时路径：MRQ 不走这里，走 SetupView
 	if (!CameraComponent.IsValid() || !CameraComponent->bUseAsymmetricProjection)
 	{
 		return;
@@ -38,6 +40,7 @@ void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionDat
 
 	// 用屏幕旋转构建 ViewRotationMatrix，和 LocalPlayer.cpp:1244 一样：
 	//   FInverseRotationMatrix(ViewRotation) * SwizzleMatrix
+	// SwizzleMatrix 将 UE 坐标系（X=前，Y=右，Z=上）转换为渲染坐标系（X=右，Y=上，Z=前）
 	static const FMatrix SwizzleMatrix(
 		FPlane(0, 0, 1, 0),
 		FPlane(1, 0, 0, 0),
@@ -46,7 +49,7 @@ void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionDat
 	);
 	const FMatrix ViewRotationMatrix = FInverseRotationMatrix(ViewRotation) * SwizzleMatrix;
 
-	// 调试日志（只打前 3 帧）
+	// 调试日志（只打前 3 帧，排查投影矩阵是否正确）
 	if (GAsymmetricDebugLogFrames < 3)
 	{
 		GAsymmetricDebugLogFrames++;
@@ -66,6 +69,7 @@ void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionDat
 	InOutProjectionData.ProjectionMatrix = ProjectionMatrix;
 
 	// 约束视口比例匹配屏幕宽高比（防止拉伸）
+	// 当视口比例和屏幕比例不一致时，加上 Pillarbox（左右黑边）或 Letterbox（上下黑边）
 	if (CameraComponent->bMatchViewportAspectRatio && CameraComponent->ScreenComponent)
 	{
 		const FVector2D ScreenSize = CameraComponent->ScreenComponent->GetScreenSize();
@@ -98,14 +102,14 @@ void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionDat
 
 		if (ScreenAspect < ViewportAspect)
 		{
-			// 左右黑边（Pillarbox）
+			// 左右黑边（Pillarbox）：屏幕比视口窄
 			NewH = ViewH;
 			NewW = FMath::RoundToInt(static_cast<float>(ViewH) * ScreenAspect);
 			OffX += (ViewW - NewW) / 2;
 		}
 		else
 		{
-			// 上下黑边（Letterbox）
+			// 上下黑边（Letterbox）：屏幕比视口宽
 			NewW = ViewW;
 			NewH = FMath::RoundToInt(static_cast<float>(ViewW) / ScreenAspect);
 			OffY += (ViewH - NewH) / 2;
@@ -118,8 +122,8 @@ void FAsymmetricViewExtension::SetupViewProjectionMatrix(FSceneViewProjectionDat
 
 void FAsymmetricViewExtension::SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView)
 {
-	// MRQ (Movie Render Queue) does not call SetupViewProjectionMatrix,
-	// so we apply the asymmetric projection here for offline renders.
+	// MRQ（Movie Render Queue）不调用 SetupViewProjectionMatrix，
+	// 所以在这里对离线渲染应用非对称投影。
 	if (!InView.bIsOfflineRender)
 	{
 		return;
@@ -132,10 +136,9 @@ void FAsymmetricViewExtension::SetupView(FSceneViewFamily& InViewFamily, FSceneV
 		return;
 	}
 
-	// Use the view's already-set location so stereo eye offsets applied by
-	// MoviePipelineAsymmetricStereoPass::GetCameraInfo are respected.
-	// Falling back to the component center would produce identical projections
-	// for both eyes (no parallax).
+	// 直接使用视图已设定的 ViewLocation 作为眼睛位置，
+	// 这样 MoviePipelineAsymmetricStereoPass::GetCameraInfo 已应用的左右眼偏移会被正确保留。
+	// 如果改用组件中心位置，左右眼会得到相同的投影矩阵（没有视差）。
 	FVector EyePosition = InView.ViewLocation;
 	FRotator ViewRotation;
 	FMatrix ProjectionMatrix;
@@ -145,10 +148,8 @@ void FAsymmetricViewExtension::SetupView(FSceneViewFamily& InViewFamily, FSceneV
 		return;
 	}
 
-	// Determine which eye this is (0=left/mono, 1=right) so each eye maintains its own
-	// previous-frame data. Without per-eye tracking, the second eye to render each frame
-	// would read the first eye's current-frame position as its "previous" transform,
-	// producing incorrect motion blur vectors for one eye.
+	// 判断当前是哪只眼（0=左眼/单目，1=右眼），每眼独立维护前帧数据。
+	// 不区分眼别时，第二只眼会把第一只眼当前帧的位置当成"前帧"，导致运动模糊向量错误。
 	int32 EyeIdx = 0;
 	if (CameraComponent->EyeSeparation > SMALL_NUMBER)
 	{
@@ -156,25 +157,26 @@ void FAsymmetricViewExtension::SetupView(FSceneViewFamily& InViewFamily, FSceneV
 		CameraComponent->GetEffectiveScreenCorners(ScreenBL, ScreenBR, ScreenTL, ScreenTR);
 		const FVector ScreenRight = (ScreenBR - ScreenBL).GetSafeNormal();
 		const FVector BaseEyePos = CameraComponent->GetEyePosition();
+		// 点积正数说明眼睛在屏幕右侧（右眼），负数在左侧（左眼）
 		const float Side = FVector::DotProduct(EyePosition - BaseEyePos, ScreenRight);
 		EyeIdx = (Side >= 0.0f) ? 1 : 0;
 	}
 
-	// Set previous frame transform for motion blur support.
-	// On the first frame we use current data (no motion blur for frame 0).
+	// 写入前帧变换数据，供运动模糊速度缓冲区计算使用。
+	// 第一帧没有前帧数据，不设 PreviousViewTransform（首帧无运动模糊，是 MRQ 固有限制）。
 	FPerEyePreviousData& PrevData = PrevDataPerEye[EyeIdx];
 	if (PrevData.bHasData)
 	{
 		InView.PreviousViewTransform = FTransform(PrevData.ViewRotation.Quaternion(), PrevData.EyePosition);
 	}
 
-	// Cache current frame data for next frame
+	// 缓存当前帧数据，供下一帧使用
 	PrevData.EyePosition = EyePosition;
 	PrevData.ViewRotation = ViewRotation;
 	PrevData.bHasData = true;
 
+	// 更新投影矩阵、视图位置和视图矩阵
 	InView.UpdateProjectionMatrix(ProjectionMatrix);
-
 	InView.ViewLocation = EyePosition;
 	InView.ViewRotation = ViewRotation;
 	InView.UpdateViewMatrix();

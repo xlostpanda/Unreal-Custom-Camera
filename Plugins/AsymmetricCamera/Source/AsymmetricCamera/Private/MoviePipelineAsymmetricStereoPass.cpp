@@ -1,4 +1,4 @@
-// Custom MRQ render pass for stereo rendering with AsymmetricCamera
+// MRQ 立体渲染 Pass 实现 — 每帧渲染左右眼，并调用 FFmpeg 合成 SBS/TB 输出
 
 #include "MoviePipelineAsymmetricStereoPass.h"
 #include "AsymmetricCameraComponent.h"
@@ -19,6 +19,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogAsymmetricStereoPass, Log, All);
 
 namespace
 {
+	// 获取 FFmpeg 编码器名称字符串
 	FString GetFFmpegCodecString(EFFmpegVideoCodec InCodec)
 	{
 		switch (InCodec)
@@ -29,6 +30,7 @@ namespace
 		}
 	}
 
+	// 获取输出容器格式字符串（H.265 强制 MKV）
 	FString GetFFmpegFormatString(EFFmpegOutputFormat InFormat)
 	{
 		switch (InFormat)
@@ -41,31 +43,34 @@ namespace
 		}
 	}
 
+	// 获取像素格式（固定 yuv420p，兼容最广）
 	FString GetFFmpegPixFmtForCodec(EFFmpegVideoCodec /*InCodec*/)
 	{
 		return TEXT("yuv420p");
 	}
 
+	// 获取视频质量参数字符串
+	// -preset slow：慢速编码，相同 CRF 下压缩率更高、质量更好
 	FString GetFFmpegQualityArgs(EFFmpegVideoCodec /*InCodec*/, int32 InCRF)
 	{
-		// -preset slow: slower encode, better compression/quality at the same CRF.
-		// This gives maximum quality without going lossless (CRF 0).
 		return FString::Printf(TEXT("-crf %d -preset slow"), InCRF);
 	}
 
+	// 获取立体 3D 元数据参数
+	// H.264：嵌入 Frame Packing SEI；H.265：使用 MKV 容器 stereo_mode 元数据
 	FString GetStereoMetadataArgs(EFFmpegVideoCodec InCodec, EAsymmetricStereoLayout InLayout)
 	{
 		switch (InCodec)
 		{
 		case EFFmpegVideoCodec::H264:
 			{
-				// H.264 Frame Packing Arrangement SEI: 3=side-by-side, 4=top-bottom
+				// Frame Packing Arrangement SEI: type 3=SBS, type 4=TB，VLC/PotPlayer 可自动识别
 				const int32 FramePackingType = (InLayout == EAsymmetricStereoLayout::SideBySide) ? 3 : 4;
 				return FString::Printf(TEXT("-x264-params frame-packing=%d"), FramePackingType);
 			}
 		case EFFmpegVideoCodec::H265:
 			{
-				// x265 has no frame-packing CLI param; use MKV container stereo_mode metadata
+				// x265 不支持 frame-packing CLI 参数，改用 MKV 容器的 stereo_mode 元数据
 				const TCHAR* StereoMode = (InLayout == EAsymmetricStereoLayout::SideBySide)
 					? TEXT("side_by_side_left") : TEXT("top_bottom_left");
 				return FString::Printf(TEXT("-metadata:s:v stereo_mode=%s"), StereoMode);
@@ -75,9 +80,9 @@ namespace
 		}
 	}
 
+	// 获取最终输出格式（H.265 强制使用 MKV 以支持 stereo_mode 元数据）
 	FString GetOutputFormat(EFFmpegVideoCodec InCodec, EFFmpegOutputFormat InFormat)
 	{
-		// H.265 forces MKV container for stereo_mode metadata support
 		if (InCodec == EFFmpegVideoCodec::H265)
 		{
 			return TEXT("mkv");
@@ -85,10 +90,9 @@ namespace
 		return GetFFmpegFormatString(InFormat);
 	}
 
-	/** Resolve FFmpeg executable path from an FFilePath property.
-	 *  Always converts to an absolute path — the editor file picker may store
-	 *  an absolute path or (rarely) a path relative to the project directory.
-	 *  Falls back to "ffmpeg" (system PATH) if the field is empty. */
+	/** 解析 FFmpeg 可执行文件路径。
+	 *  始终转换为绝对路径，处理编辑器 FFilePath 属性可能存储相对路径的情况。
+	 *  路径为空时回退到系统 PATH 中的 ffmpeg。 */
 	FString ResolveFFmpegPath(const FFilePath& UserPath)
 	{
 		if (UserPath.FilePath.IsEmpty())
@@ -99,7 +103,7 @@ namespace
 			return TEXT("ffmpeg");
 		}
 
-		// Ensure the path is always absolute regardless of how the editor stored it
+		// 确保路径始终是绝对路径，与编辑器存储方式无关
 		FString Resolved = UserPath.FilePath;
 		if (FPaths::IsRelative(Resolved))
 		{
@@ -131,11 +135,11 @@ UMoviePipelineAsymmetricStereoPass::UMoviePipelineAsymmetricStereoPass()
 	OutputFormat   = EFFmpegOutputFormat::MP4;
 	bDeleteSourceAfterComposite = true;
 	bDebugSaveConcatFiles = false;
-	// FFmpegPath left empty — user must set an absolute path in the pass settings.
+	// FFmpegPath 默认留空，用户必须在 Pass 设置里填写绝对路径（或留空使用系统 PATH）
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MRQ lifecycle
+// MRQ 生命周期
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UMoviePipelineAsymmetricStereoPass::SetupImpl(const MoviePipeline::FMoviePipelineRenderPassInitSettings& InPassInitSettings)
@@ -177,23 +181,21 @@ void UMoviePipelineAsymmetricStereoPass::TeardownImpl()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Export lifecycle
+// 导出生命周期（渲染完成后调用 FFmpeg 合成）
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UMoviePipelineAsymmetricStereoPass::BuildCompositeQueue()
 {
-	// MRQ provides GetOutputDataParams() which returns the complete output manifest
-	// after all files have been written to disk. This is called from BeginExportImpl.
-	//
-	// Structure:
+	// MRQ 渲染完成后，通过 GetOutputDataParams() 拿到完整的输出文件清单。
+	// 数据结构：
 	//   FMoviePipelineOutputData
-	//     .ShotData[]                           — one entry per shot
+	//     .ShotData[]                           — 每个 Shot 一条记录
 	//       .Shot                               — UMoviePipelineExecutorShot*
 	//       .RenderPassData[PassIdentifier]
-	//         .FilePaths[]                      — absolute paths, all frames
+	//         .FilePaths[]                      — 绝对路径，所有帧
 	//
-	// We collect LeftEye and RightEye paths per shot, sort them (guarantees frame
-	// order regardless of starting frame number or gaps), and build FShotCompositeRecord.
+	// 按 Shot 收集 LeftEye 和 RightEye 文件路径，排序后构建 FShotCompositeRecord。
+	// 排序保证帧顺序正确，不依赖起始帧号或文件名格式。
 
 	UMoviePipeline* Pipeline = GetPipeline();
 	if (!Pipeline)
@@ -211,8 +213,7 @@ void UMoviePipelineAsymmetricStereoPass::BuildCompositeQueue()
 
 		FShotCompositeRecord Record;
 		Record.FrameRate = EffectiveFrameRate;
-		// Use OuterName (shot section name) when available, fall back to index.
-		// Replace spaces with underscores so the name is safe for use in file paths.
+		// 用 Shot Section 名称作为输出文件名的一部分，空格替换为下划线
 		const UMoviePipelineExecutorShot* Shot = ShotOutput.Shot.Get();
 		FString RawShotName = (Shot && !Shot->OuterName.IsEmpty())
 			? Shot->OuterName
@@ -247,6 +248,7 @@ void UMoviePipelineAsymmetricStereoPass::BuildCompositeQueue()
 		}
 
 		// Sort guarantees ascending frame order regardless of number format or start offset
+		// 排序保证帧升序，无论文件名格式或起始帧号
 		Record.LeftEyePaths.Sort();
 		Record.RightEyePaths.Sort();
 
@@ -373,7 +375,7 @@ bool UMoviePipelineAsymmetricStereoPass::HasFinishedExportingImpl()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Multi-camera / stereo eye overrides
+// 多相机 / 立体眼别覆写
 // ─────────────────────────────────────────────────────────────────────────────
 
 int32 UMoviePipelineAsymmetricStereoPass::GetNumCamerasToRender() const
@@ -383,9 +385,8 @@ int32 UMoviePipelineAsymmetricStereoPass::GetNumCamerasToRender() const
 
 int32 UMoviePipelineAsymmetricStereoPass::GetCameraIndexForRenderPass(const int32 InCameraIndex) const
 {
-	// The base class returns -1 when bRenderAllCameras is false, which causes
-	// CameraIndex to be -1 in GetCameraInfo, making both eyes render as left eye.
-	// We always pass through the actual camera index so left (0) and right (1) are distinct.
+	// 基类在 bRenderAllCameras=false 时返回 -1，会导致两眼都按左眼渲染。
+	// 直接透传实际索引，确保左眼（0）和右眼（1）各自独立。
 	return InCameraIndex;
 }
 
@@ -408,7 +409,7 @@ FString UMoviePipelineAsymmetricStereoPass::GetCameraNameOverride(const int32 In
 UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::GetCameraInfo(
 	FMoviePipelineRenderPassMetrics& InOutSampleState, IViewCalcPayload* OptPayload) const
 {
-	// Always get base camera data from PlayerCameraManager (single camera path)
+	// 始终从 PlayerCameraManager 获取基础相机数据（单相机路径）
 	UE::MoviePipeline::FImagePassCameraViewData OutCameraData =
 		UMoviePipelineImagePassBase::GetCameraInfo(InOutSampleState, OptPayload);
 
@@ -421,7 +422,7 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 	const int32 EyeIdx      = GetEyeIndex(CameraIndex);
 	const float EyeSign     = (EyeIdx == 0) ? -1.0f : 1.0f;
 
-	// Calculate eye offset along screen right vector
+	// 沿屏幕右方向计算眼睛偏移量
 	FVector EyeOffset;
 	if (CachedCameraComponent.IsValid())
 	{
@@ -438,8 +439,8 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 
 	OutCameraData.ViewInfo.Location += EyeOffset;
 
-	// Apply asymmetric off-axis projection if available.
-	// ComponentEyeSeparation must be 0; IPD is controlled by this pass's EyeSeparation only.
+	// 应用非对称离轴投影（如果有 AsymmetricCameraComponent）。
+	// ComponentEyeSeparation 必须为 0，IPD 只由本 Pass 的 EyeSeparation 控制。
 	if (CachedCameraComponent.IsValid() && CachedCameraComponent->bUseAsymmetricProjection)
 	{
 		FVector    EyePosition = OutCameraData.ViewInfo.Location;
@@ -459,8 +460,7 @@ UE::MoviePipeline::FImagePassCameraViewData UMoviePipelineAsymmetricStereoPass::
 void UMoviePipelineAsymmetricStereoPass::BlendPostProcessSettings(
 	FSceneView* InView, FMoviePipelineRenderPassMetrics& InOutSampleState, IViewCalcPayload* OptPayload)
 {
-	// Use the single-camera (PlayerCameraManager) path to avoid accessing the empty
-	// SidecarCameras array which causes a crash in the deferred pass base.
+	// 使用单相机（PlayerCameraManager）路径，避免访问空的 SidecarCameras 数组导致崩溃。
 	UMoviePipelineImagePassBase::BlendPostProcessSettings(InView, InOutSampleState, OptPayload);
 }
 
@@ -472,7 +472,7 @@ FText UMoviePipelineAsymmetricStereoPass::GetDisplayText() const
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Private helpers
+// 私有辅助函数
 // ─────────────────────────────────────────────────────────────────────────────
 
 int32 UMoviePipelineAsymmetricStereoPass::GetEyeIndex(const int32 InCameraIndex) const
@@ -483,15 +483,15 @@ int32 UMoviePipelineAsymmetricStereoPass::GetEyeIndex(const int32 InCameraIndex)
 FString UMoviePipelineAsymmetricStereoPass::WriteConcatList(
 	const TArray<FString>& FilePaths, const FString& ListFilePath) const
 {
-	// FFmpeg concat demuxer format — one line per file, single-quoted path.
-	// This approach is immune to frame number format, starting offset, and gaps.
+	// FFmpeg concat demuxer 格式：每行一个文件，路径用单引号括起来。
+	// 这种方式对帧号格式、起始帧和文件名间隔均无要求。
 	TArray<FString> Lines;
 	Lines.Reserve(FilePaths.Num());
 	for (const FString& Path : FilePaths)
 	{
 		FString Normalized = Path;
 		FPaths::NormalizeFilename(Normalized);
-		// Escape embedded single quotes for the concat list format
+		// 转义路径中的单引号（concat list 格式要求）
 		Normalized.ReplaceInline(TEXT("'"), TEXT("'\\''"));
 		Lines.Add(FString::Printf(TEXT("file '%s'"), *Normalized));
 	}
@@ -510,9 +510,8 @@ void UMoviePipelineAsymmetricStereoPass::LaunchFFmpegForShot(const FShotComposit
 {
 	const FString FFmpegExe = ResolveFFmpegPath(FFmpegPath);
 
-	// Write concat demuxer list files — one for each eye.
-	// FFmpeg will read exactly the files listed, in order, regardless of their
-	// frame numbers. No %04d pattern, no -start_number guessing needed.
+	// 写入左右眼 concat 列表文件。
+	// FFmpeg 按列表中的顺序读取，不依赖帧号模式，不需要 -start_number。
 	const FString LeftListPath  = FPaths::Combine(Record.OutputDir,
 		FString::Printf(TEXT("_concat_left_%s.txt"),  *Record.ShotName));
 	const FString RightListPath = FPaths::Combine(Record.OutputDir,
@@ -541,18 +540,17 @@ void UMoviePipelineAsymmetricStereoPass::LaunchFFmpegForShot(const FShotComposit
 
 	if (CompositeMode == EAsymmetricCompositeMode::ImageSequence)
 	{
-		// Derive output extension from first left-eye file
+		// 从第一个左眼文件推导输出扩展名，保持和源文件格式一致
 		const FString Extension = FPaths::GetExtension(Record.LeftEyePaths[0], /*bIncludeDot=*/true);
 		OutputPath = FPaths::Combine(Record.OutputDir,
 			FString::Printf(TEXT("stereo_%s_%s_%%05d%s"), *LayoutName, *Record.ShotName, *Extension));
 
-		// For JPEG output, -q:v 1 is the highest quality (scale 1-31, lower = better).
-		// For PNG/EXR the format is already lossless; no quality flag needed.
+		// JPEG 用 -q:v 1（质量最高，1-31 越小越好）；PNG/EXR 本身无损，不需要质量参数。
 		const FString ExtLower = Extension.ToLower();
 		const bool bIsJpeg = ExtLower == TEXT(".jpg") || ExtLower == TEXT(".jpeg");
 		const FString QualityFlag = bIsJpeg ? TEXT("-q:v 1") : TEXT("");
 
-		// concat demuxer does not accept -framerate; frame rate is set on the output with -r
+		// concat demuxer 不支持 -framerate，帧率用 -r 在输出端指定
 		Args = FString::Printf(
 			TEXT("-y -f concat -safe 0 -i \"%s\" -f concat -safe 0 -i \"%s\""
 			     " -filter_complex \"[0:v][1:v]%s=inputs=2\" -r %s %s \"%s\""),
@@ -568,7 +566,7 @@ void UMoviePipelineAsymmetricStereoPass::LaunchFFmpegForShot(const FShotComposit
 		OutputPath = FPaths::Combine(Record.OutputDir,
 			FString::Printf(TEXT("stereo_%s_%s.%s"), *LayoutName, *Record.ShotName, *Fmt));
 
-		// concat demuxer does not accept -framerate; frame rate is set on the output with -r
+		// concat demuxer 不支持 -framerate，帧率用 -r 在输出端指定
 		Args = FString::Printf(
 			TEXT("-y -f concat -safe 0 -i \"%s\""
 			     " -f concat -safe 0 -i \"%s\""
@@ -592,14 +590,13 @@ void UMoviePipelineAsymmetricStereoPass::LaunchFFmpegForShot(const FShotComposit
 		UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Right concat list (%s):\n%s"), *RightListPath, *RightContent);
 	}
 
-	// FFmpeg stderr is always captured to a log file so errors can be diagnosed.
-	// The file is deleted after composite unless debug mode is on.
+	// FFmpeg stderr 始终重定向到日志文件，方便排查错误。合成完成后根据调试开关决定是否删除。
 	const FString FFmpegLogPath = FPaths::Combine(Record.OutputDir,
 		FString::Printf(TEXT("_ffmpeg_log_%s.txt"), *Record.ShotName));
 	TempConcatFiles.Add(FFmpegLogPath);
 
-	// Redirect both stdout and stderr to the log file via cmd /c redirection.
-	// This is required because FPlatformProcess::CreateProc does not support pipe capture.
+	// 通过 cmd /c 将 stdout 和 stderr 都重定向到日志文件。
+	// FPlatformProcess::CreateProc 不支持管道捕获，必须用 shell 重定向。
 	const FString CmdExe = TEXT("cmd.exe");
 	const FString CmdArgs = FString::Printf(
 		TEXT("/c \"\"%s\" %s > \"%s\" 2>&1\""),
