@@ -333,6 +333,19 @@ bool UMoviePipelineAsymmetricStereoPass::HasFinishedExportingImpl()
 			UE_LOG(LogAsymmetricStereoPass, Error,
 				TEXT("FFmpeg exited with code %d for shot '%s', keeping source files."),
 				ReturnCode, *FinishedRecord.ShotName);
+
+			// Print the FFmpeg log file contents to make the error visible in Output Log
+			const FString FFmpegLogPath = FPaths::Combine(FinishedRecord.OutputDir,
+				FString::Printf(TEXT("_ffmpeg_log_%s.txt"), *FinishedRecord.ShotName));
+			FString FFmpegOutput;
+			if (FFileHelper::LoadFileToString(FFmpegOutput, *FFmpegLogPath) && !FFmpegOutput.IsEmpty())
+			{
+				UE_LOG(LogAsymmetricStereoPass, Error, TEXT("FFmpeg output:\n%s"), *FFmpegOutput);
+			}
+			else
+			{
+				UE_LOG(LogAsymmetricStereoPass, Warning, TEXT("FFmpeg log file not found or empty: %s"), *FFmpegLogPath);
+			}
 		}
 
 		++CurrentCompositeIndex;
@@ -345,12 +358,16 @@ bool UMoviePipelineAsymmetricStereoPass::HasFinishedExportingImpl()
 		return false;
 	}
 
-	// All shots done — clean up temporary concat list files
-	for (const FString& TempFile : TempConcatFiles)
+	// Concat list files are intentionally kept on disk for debugging.
+	// Their paths are logged below so they can be inspected manually.
+	if (TempConcatFiles.Num() > 0)
 	{
-		IFileManager::Get().Delete(*TempFile);
+		UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Concat list files retained for inspection:"));
+		for (const FString& TempFile : TempConcatFiles)
+		{
+			UE_LOG(LogAsymmetricStereoPass, Log, TEXT("  %s"), *TempFile);
+		}
 	}
-	TempConcatFiles.Reset();
 
 	bExportFinished = true;
 	return true;
@@ -558,14 +575,36 @@ void UMoviePipelineAsymmetricStereoPass::LaunchFFmpegForShot(const FShotComposit
 			*OutputPath);
 	}
 
+	// Log concat list contents so they can be verified without opening the files
+	{
+		FString LeftContent, RightContent;
+		FFileHelper::LoadFileToString(LeftContent,  *LeftListPath);
+		FFileHelper::LoadFileToString(RightContent, *RightListPath);
+		UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Left concat list (%s):\n%s"),  *LeftListPath,  *LeftContent);
+		UE_LOG(LogAsymmetricStereoPass, Log, TEXT("Right concat list (%s):\n%s"), *RightListPath, *RightContent);
+	}
+
+	// FFmpeg stderr log file — kept on disk alongside the concat lists for debugging
+	const FString FFmpegLogPath = FPaths::Combine(Record.OutputDir,
+		FString::Printf(TEXT("_ffmpeg_log_%s.txt"), *Record.ShotName));
+	TempConcatFiles.Add(FFmpegLogPath);
+
+	// Redirect both stdout and stderr to the log file via cmd /c redirection.
+	// This is required because FPlatformProcess::CreateProc does not support pipe capture.
+	const FString CmdExe = TEXT("cmd.exe");
+	const FString CmdArgs = FString::Printf(
+		TEXT("/c \"\"%s\" %s > \"%s\" 2>&1\""),
+		*FFmpegExe, *Args, *FFmpegLogPath);
+
 	UE_LOG(LogAsymmetricStereoPass, Log,
 		TEXT("Launching FFmpeg for shot '%s':\n  %s %s"), *Record.ShotName, *FFmpegExe, *Args);
+	UE_LOG(LogAsymmetricStereoPass, Log, TEXT("FFmpeg output will be written to: %s"), *FFmpegLogPath);
 
 	ActiveFFmpegProcess = FPlatformProcess::CreateProc(
-		*FFmpegExe, *Args,
+		*CmdExe, *CmdArgs,
 		/*bLaunchDetached=*/false,
-		/*bLaunchHidden=*/false,
-		/*bLaunchReallyHidden=*/false,
+		/*bLaunchHidden=*/true,
+		/*bLaunchReallyHidden=*/true,
 		nullptr, 0, nullptr, nullptr);
 
 	if (!ActiveFFmpegProcess.IsValid())
