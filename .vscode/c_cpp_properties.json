@@ -4,8 +4,27 @@
       "name": "Win64",
       "includePath": [
         "${workspaceFolder}/**",
-        "D:/UE/UE/UE_5.4/Engine/Source/**",
-        "D:/UE/UE/UE_5.4/Engine/Plugins/**"
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Core/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/CoreUObject/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Engine/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Engine/Classes",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/RenderCore/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Renderer/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Projects/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/ApplicationCore/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/InputCore/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/SlateCore/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/Slate/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/UMG/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Developer/DesktopPlatform/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Editor/UnrealEd/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Editor/UnrealEd/Classes",
+        "D:/UE/UE/UE_5.4/Engine/Plugins/MovieScene/MovieRenderPipeline/Source/MovieRenderPipelineCore/Public",
+        "D:/UE/UE/UE_5.4/Engine/Plugins/MovieScene/MovieRenderPipeline/Source/MovieRenderPipelineRenderPasses/Public",
+        "D:/UE/UE/UE_5.4/Engine/Plugins/MovieScene/MovieRenderPipeline/Source/MovieRenderPipelineEditor/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/MovieScene/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/MovieSceneTracks/Public",
+        "D:/UE/UE/UE_5.4/Engine/Source/Runtime/LevelSequence/Public"
       ],
       "defines": [
         "UE_BUILD_DEVELOPMENT=1",
@@ -15,7 +34,9 @@
         "UNICODE",
         "_UNICODE",
         "WIN32",
-        "_WIN64"
+        "_WIN64",
+        "PLATFORM_WINDOWS=1",
+        "PLATFORM_MICROSOFT=1"
       ],
       "compilerPath": "cl.exe",
       "cppStandard": "c++20",
