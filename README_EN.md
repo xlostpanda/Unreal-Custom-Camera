@@ -219,11 +219,27 @@ The plugin provides an `Asymmetric Stereo Pass` for rendering stereo video (Side
 
 ### Composite Output Naming
 
+Output filenames include the layout mode and the shot name (taken from the Sequencer Shot Section name, e.g. `shot0000`):
+
 | Mode | Example output filename |
 | ---- | ----------------------- |
-| `Image Sequence` | `stereo_SBS.0000.jpeg`, `stereo_TB.0000.png` |
-| `Video` (SBS) | `stereo_SBS.mp4` |
-| `Video` (TB) | `stereo_TB.mkv` (H.265) |
+| `Image Sequence` | `stereo_SBS_shot0000_%05d.jpeg`, `stereo_TB_shot0001_%05d.png` |
+| `Video` (SBS) | `stereo_SBS_shot0000.mp4` |
+| `Video` (TB) | `stereo_TB_shot0000.mkv` (H.265) |
+
+Multiple shots each produce their own composite output, processed serially in order.
+
+### Composite Mechanism
+
+Compositing uses FFmpeg's **concat demuxer** — a temporary list file explicitly names every input frame instead of relying on a frame-number pattern (`%04d`). This means:
+
+- **Frame number agnostic** — Handle Frames, mid-sequence shots, or any starting frame number all work correctly
+- **Filename format agnostic** — no requirement on separator characters or zero-padding width
+- **Gap-safe** — partial re-renders or non-contiguous frames do not break compositing
+- **Full multi-shot coverage** — every shot is composited independently; no shots are silently skipped
+- **Exact frame rate** — passed as a `Numerator/Denominator` fraction (e.g. `24000/1001` for 23.976 fps)
+
+The only requirement: the MRQ output filename template must include `{camera_name}` so that LeftEye and RightEye files can be distinguished.
 
 ### FFmpeg
 
