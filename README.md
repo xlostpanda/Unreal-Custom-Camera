@@ -206,11 +206,12 @@ AAsymmetricCameraActor
 | `EyeSeparation` | 眼间距，单位厘米，默认 6.4 |
 | `bSwapEyes` | 交换左右眼 |
 | `CompositeMode` | 合成模式：`Disabled`（保留分离序列）/ `Image Sequence`（每帧合并图片，**默认**）/ `Video`（合并视频） |
-| `FFmpegPath` | FFmpeg 路径，留空则使用插件内置的 FFmpeg（支持文件选择器） |
+| `FFmpegPath` | FFmpeg 可执行文件路径。点击 `...` 浏览选择，或直接输入绝对路径（如 `D:/tools/ffmpeg/bin/ffmpeg.exe`）。留空则使用系统 PATH 中的 `ffmpeg` |
 | `VideoCodec` | 视频编码器：H.264 / H.265（仅 `Video` 模式有效） |
 | `CompositeQuality` | CRF 质量值（0=无损，18=推荐，51=最差，仅 `Video` 模式有效） |
 | `OutputFormat` | 输出格式：MP4 / MOV / MKV / AVI（H.265 强制使用 MKV，仅 `Video` 模式有效） |
 | `bDeleteSourceAfterComposite` | 合成成功后自动删除左右眼源图片序列（默认开启） |
+| `bDebugSaveConcatFiles` | 调试模式：保留 concat 列表文件和 FFmpeg 日志（`_concat_*.txt` / `_ffmpeg_log_*.txt`），默认关闭，合成失败时可开启排查 |
 
 > **立体 3D 元数据（`Video` 模式）：**
 >
@@ -243,7 +244,9 @@ AAsymmetricCameraActor
 
 ### FFmpeg
 
-插件在 `ThirdParty/FFmpeg/Win64/` 下内置了 ffmpeg.exe（通过 Git LFS 管理）。也可以在 `FFmpegPath` 中手动指定系统上已安装的 FFmpeg 路径。
+在 `FFmpegPath` 中填写 FFmpeg 可执行文件的绝对路径（如 `D:/tools/ffmpeg/bin/ffmpeg.exe`），或点击 `...` 按钮浏览选择。留空时将使用系统 PATH 中的 `ffmpeg`（需自行安装并加入 PATH）。
+
+> **提示：** FFmpeg 可从 [ffmpeg.org](https://ffmpeg.org/download.html) 或 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载 Windows 预编译版本。
 
 ## Git LFS
 
@@ -269,6 +272,22 @@ QuickBuild.bat
 # 如果 QuickBuild 无法编译，可直接打开项目在编辑器中编译（Ctrl+Alt+F11）
 start "" "MyCustomCam.uproject"
 ```
+
+## 开发环境（VSCode IntelliSense）
+
+本项目配置了 clangd 以提供准确的 C++ 代码补全和跳转。
+
+**前提：** 安装 VSCode [clangd 扩展](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd)，并**禁用** Microsoft C/C++ 扩展（两者冲突）。
+
+**生成编译数据库（首次或修改 Build.cs 后执行）：**
+
+```bash
+GenerateCompileCommands.bat
+```
+
+脚本会调用 UBT 生成 `compile_commands.json` 并复制到项目根目录。完成后在 VSCode 中执行 `clangd: Restart language server` 使配置生效。
+
+> `compile_commands.json` 已加入 `.gitignore`，不会提交到仓库，每台开发机需单独生成。
 
 ## 参考资料
 

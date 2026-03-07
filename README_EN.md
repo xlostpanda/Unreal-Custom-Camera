@@ -206,11 +206,12 @@ The plugin provides an `Asymmetric Stereo Pass` for rendering stereo video (Side
 | `EyeSeparation` | Inter-ocular distance in centimeters (default 6.4) |
 | `bSwapEyes` | Swap left and right eye output |
 | `CompositeMode` | `Disabled` (keep separate sequences) / `Image Sequence` (one merged image per frame, **default**) / `Video` (merged video file) |
-| `FFmpegPath` | Path to FFmpeg executable; leave empty to use the bundled one (file picker supported) |
+| `FFmpegPath` | Path to FFmpeg executable. Click `...` to browse, or type an absolute path (e.g. `D:/tools/ffmpeg/bin/ffmpeg.exe`). Leave empty to use `ffmpeg` from the system PATH |
 | `VideoCodec` | Video encoder: H.264 / H.265 (`Video` mode only) |
 | `CompositeQuality` | CRF quality value: 0=lossless, 18=recommended, 51=worst (`Video` mode only) |
 | `OutputFormat` | Output format: MP4 / MOV / MKV / AVI; H.265 forces MKV (`Video` mode only) |
 | `bDeleteSourceAfterComposite` | Auto-delete left/right eye source sequences after successful composite (default: on) |
+| `bDebugSaveConcatFiles` | Debug mode: keep concat list files and FFmpeg log files (`_concat_*.txt` / `_ffmpeg_log_*.txt`) on disk. Default off; enable when diagnosing composite failures |
 
 > **Stereo 3D metadata (`Video` mode):**
 >
@@ -243,7 +244,9 @@ The only requirement: the MRQ output filename template must include `{camera_nam
 
 ### FFmpeg
 
-The plugin bundles ffmpeg.exe under `ThirdParty/FFmpeg/Win64/` (managed via Git LFS). You can also set `FFmpegPath` to point to an FFmpeg installation on your system.
+Set `FFmpegPath` to the absolute path of your FFmpeg executable (e.g. `D:/tools/ffmpeg/bin/ffmpeg.exe`), or use the `...` file picker. Leave empty to fall back to `ffmpeg` on the system PATH (requires FFmpeg to be installed and in PATH).
+
+> **Tip:** Pre-built Windows binaries are available at [ffmpeg.org](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/).
 
 ## Git LFS
 
@@ -270,6 +273,22 @@ QuickBuild.bat
 # and compile from there (Ctrl+Alt+F11)
 start "" "MyCustomCam.uproject"
 ```
+
+## Development Environment (VSCode IntelliSense)
+
+The project is configured for clangd to provide accurate C++ completion and navigation.
+
+**Prerequisite:** Install the VSCode [clangd extension](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd) and **disable** the Microsoft C/C++ extension (the two conflict).
+
+**Generate the compile database (run once, and again after modifying Build.cs):**
+
+```bash
+GenerateCompileCommands.bat
+```
+
+The script calls UBT in `GenerateClangDatabase` mode and copies the resulting `compile_commands.json` to the project root. Afterwards, run `clangd: Restart language server` in VSCode to apply.
+
+> `compile_commands.json` is listed in `.gitignore` and is not committed. Each developer machine must generate it locally.
 
 ## References
 
